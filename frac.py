@@ -26,6 +26,10 @@ class Fraction:
             if np.isclose(denominator, 0):
                 raise DivisionByZero
 
+            elif denominator < 0:
+                denominator = -denominator
+                self.numerator = -self.numerator
+
             denom_fraction = Fraction(*denominator.as_integer_ratio())
 
             self.numerator *= denom_fraction.denominator
@@ -34,6 +38,10 @@ class Fraction:
         elif np.issubdtype(type(denominator), np.integer):
             if denominator == 0:
                 raise DivisionByZero
+
+            elif denominator < 0:
+                denominator = -denominator
+                self.numerator = -self.numerator
 
             self.denominator *= denominator
 
@@ -105,4 +113,4 @@ class Fraction:
         return self.numerator / self.denominator
 
     def __repr__(self) -> str:
-        return f"{self.numerator}/{self.denominator}"
+        return f"{self.numerator:+}/{self.denominator}"

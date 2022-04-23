@@ -92,6 +92,8 @@ class FPI(PL):
         self.tableau[ 1 : , : self.num_vars ] = self.a_matrix
         self.tableau[ 1 : , -1 ] = self.b_vec.T
 
+        self.tableau[ 0, -1 ] = padronize(self.tableau[ 0, -1 ], self.fraction)
+
     def __init_c__ (self, pl: PL) -> None:
         self.c_vec = np.zeros(self.num_vars, dtype=pl.c_vec.dtype)
         self.c_vec[ : -self.num_aux] = (
@@ -135,10 +137,10 @@ class FPI(PL):
         st = "| " + " ".join([
             str_ratio(self.tableau[ 0, column ]) + ("*" if column == column_t else "")
             for column in range(self.tableau.shape[1] - 1)
-        ]) + f" | {str_ratio(self.tableau[ 0, -1 ])} |\n"
+        ]) + f" | {str_ratio(self.tableau[ 0, -1 ])} | \n"
 
         return st + "\n".join([
-            f"| {' '.join([ str_ratio(res) for res in self.tableau[ row, : -1 ] ] )} | " +
+            f"| {' '.join([ str_ratio(res) for res in self.tableau[ row, : -1 ] ] )} |" +
             f" {str_ratio(self.tableau[ row, -1 ])} | " + (str_ratio(min_t) if row_t == row else "")
             for row in range(1, self.num_res + 1)
         ]) + "\n"
