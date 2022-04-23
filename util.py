@@ -1,3 +1,5 @@
+import numpy as np
+
 from enum import Enum
 from typing import Union
 
@@ -64,9 +66,38 @@ def floatize (x: Rational) -> Rational:
 
     return float(x)
 
+def eq (x: Rational, y: Rational) -> bool:
+    if isinstance(x, Fraction):
+        pass
+
+    return np.isclose(x, y)
+
+def leq (x: Rational, y: Rational) -> bool:
+    if isinstance(x, Fraction):
+        pass
+
+    else:
+        return x < y or eq(x, y)
+
+def beq (x: Rational, y: Rational) -> bool:
+    if isinstance(x, Fraction):
+        pass
+
+    else:
+        return x > y or eq(x, y)
+
+def bt (x: Rational, y: Rational) -> bool:
+    return not leq(x, y)
+
+def lt (x: Rational, y: Rational) -> bool:
+    return not beq(x, y)
+
 def str_ratio (x: Rational) -> str:
     if isinstance(x, Fraction):
         return str(x)
 
     else:
         return f"{x:>+7.3f}"
+
+class InvalidPL(Exception):
+    pass

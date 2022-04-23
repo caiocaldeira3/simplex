@@ -2,7 +2,9 @@ from __future__ import annotations
 import numpy as np
 
 from util import (
-    Rational, ProblemClass, RestrictionType, padronize, str_ratio
+    Rational,
+    leq, beq, lt, bt, padronize, str_ratio,
+    InvalidPL, ProblemClass, RestrictionType
 )
 
 class PL:
@@ -47,6 +49,9 @@ class PL:
 
     def solve (self) -> Rational:
         return FPI(self).solve()
+
+    def compute (self, x: np.ndarray) -> Rational:
+        return self.c_vec @ padronize(x)
 
     def __format_cvec__ (self) -> range:
         for idx in range(self.num_vars):
@@ -117,17 +122,27 @@ class FPI(PL):
         pass
 
     def __get_t__ (self, row: int, column: int) -> Rational:
+        if leq(self.tableau[row, column], 0):
+            return padronize(np.inf, self.fraction)
+
         return self.tableau[row, -1] / self.tableau[row, column]
 
     def stagger_column (self, column: int) -> None:
         row_t = min(range(1, self.num_res + 1), key=lambda r: self.__get_t__(r, column))
+        if leq(self.tableau[row_t][column], 0):
+            raise InvalidPL
+
+        self.debug(row_t, column)
+
+        self.tableau[row_t] /= self.tableau[row_t, column]
         for row in range(self.num_res + 1):
             if row == row_t:
                 continue
 
-            ratio = self.tableau[row, column]
+            ratio = self.tableau[row, column] / self.tableau[row_t, column]
+            self.tableau[row] -= self.tableau[row_t] * ratio
 
-    def str_simplex (self, row_t: int = -1, column_t: int = -1) -> str:
+    def str_tableau (self, row_t: int = -1, column_t: int = -1) -> str:
         if row_t != -1 and column_t != -1:
             min_t = self.__get_t__(row_t, column_t)
 
@@ -144,6 +159,10 @@ class FPI(PL):
             f" {str_ratio(self.tableau[ row, -1 ])} | " + (str_ratio(min_t) if row_t == row else "")
             for row in range(1, self.num_res + 1)
         ]) + "\n"
+
+    def debug (self, *args) -> None:
+        print(self.str_tableau(*args))
+        print("-" * 100)
 
 class AuxPL(FPI):
     def __init_c__ (self, pl: PL) -> None:
@@ -162,13 +181,19 @@ class AuxPL(FPI):
             self.tableau[0] -= self.tableau[aux_idx]
             self.debug()
 
-        while True:
+        flag = True
+        while flag:
+            flag = False
             for column in range(self.tableau.shape[1] - 1):
-                if self.tableau[ 0, column ] < 0:
+                if lt(self.tableau[ 0, column ], 0):
+                    flag = True
                     self.stagger_column(column)
                     break
 
+            self.debug()
 
-    def debug (self) -> None:
-        print(self.str_simplex())
-        print("-" * 100)
+        if lt(self.tableau[ 0, -1 ], 0):
+            raise InvalidPL
+
+        self.tableau, aux_matrix = aux_matrix, self.tableau
+        return aux_matrix
