@@ -130,17 +130,16 @@ class FPI(PL):
             min_t = self.__get_t__(row_t, column_t)
 
         elif row_t != -1 or column_t != -1:
-            raise Exception
+            raise IndexError
 
         st = "| " + " ".join([
-            f"{str_ratio(self.tableau[ 0, column ])}" + ("*" if column == column_t else "")
+            str_ratio(self.tableau[ 0, column ]) + ("*" if column == column_t else "")
             for column in range(self.tableau.shape[1] - 1)
-        ]) + f" | {self.tableau[ 0, -1 ]:>+7.3f} |\n"
+        ]) + f" | {str_ratio(self.tableau[ 0, -1 ])} |\n"
 
         return st + "\n".join([
-            f"| {' '.join([ f'{res:>+7.3f}' for res in self.tableau[ row, : -1 ] ] )} | " +
-            f" {self.tableau[ row, -1 ]:>+7.3f} |" +
-            (f"{str_ratio(min_t)}" if row_t == row else "")
+            f"| {' '.join([ str_ratio(res) for res in self.tableau[ row, : -1 ] ] )} | " +
+            f" {str_ratio(self.tableau[ row, -1 ])} | " + (str_ratio(min_t) if row_t == row else "")
             for row in range(1, self.num_res + 1)
         ]) + "\n"
 
