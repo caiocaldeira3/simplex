@@ -68,23 +68,30 @@ def floatize (x: Rational) -> Rational:
 
 def eq (x: Rational, y: Rational) -> bool:
     if isinstance(x, Fraction):
-        pass
+        return x == y
+
+    elif np.issubdtype(type(x), np.ndarray) and isinstance(x[0], Fraction):
+        return x == y
 
     return np.isclose(x, y)
 
 def leq (x: Rational, y: Rational) -> bool:
     if isinstance(x, Fraction):
-        pass
+        return x <= y
 
-    else:
-        return x < y or eq(x, y)
+    elif np.issubdtype(type(x), np.ndarray) and isinstance(x[0], Fraction):
+        return x <= y
+
+    return x < y or eq(x, y)
 
 def beq (x: Rational, y: Rational) -> bool:
     if isinstance(x, Fraction):
-        pass
+        return x >= y
 
-    else:
-        return x > y or eq(x, y)
+    elif np.issubdtype(type(x), np.ndarray) and isinstance(x[0], Fraction):
+        return x >= y
+
+    return x > y or eq(x, y)
 
 def bt (x: Rational, y: Rational) -> bool:
     return not leq(x, y)

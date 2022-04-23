@@ -125,7 +125,7 @@ class FPI(PL):
         return self.tableau[row, -1] / self.tableau[row, column]
 
     def __form_basic_solution__ (self) -> np.ndarray:
-        basic_solution = np.zeros(self.num_vars)
+        basic_solution = np.zeros(self.num_vars, self.tableau.dtype)
         for column in range(self.num_vars):
             one = np.where(eq(self.tableau[ : , column ], 1))[0]
             zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
@@ -161,8 +161,6 @@ class FPI(PL):
                     self.stagger_column(column)
                     break
 
-            self.debug()
-
     def solve (self) -> Rational:
         aux_matrix = self.tableau.copy()
 
@@ -173,12 +171,12 @@ class FPI(PL):
         self.debug()
 
         for column in range(self.num_vars):
-            if bt(bvs[column], 0):
+            if bt(bvs[column], 0) and bt(self.tableau[ 0, column ], 0):
                 self.stagger_column(column)
-                self.debug()
 
         self.__optmize__()
 
+        self.debug()
         basic_solution = self.__form_basic_solution__()
         self.tableau, aux_matrix = aux_matrix, self.tableau
 
@@ -200,7 +198,7 @@ class FPI(PL):
             f"| {' '.join([ str_ratio(res) for res in self.tableau[ row, : -1 ] ] )} |" +
             f" {str_ratio(self.tableau[ row, -1 ])} | " + (str_ratio(min_t) if row_t == row else "")
             for row in range(1, self.num_res + 1)
-        ]) + "\n"
+        ])
 
     def debug (self, *args) -> None:
         print(self.str_tableau(*args))
@@ -216,7 +214,7 @@ class AuxPL(FPI):
         return np.eye(self.num_aux)
 
     def __form_basic_solution__ (self) -> np.ndarray:
-        basic_solution = np.zeros(self.num_vars - self.num_aux)
+        basic_solution = np.zeros(self.num_vars - self.num_aux, self.tableau.dtype)
         for column in range(self.num_vars - self.num_aux):
             one = np.where(eq(self.tableau[ : , column ], 1))[0]
             zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
@@ -233,9 +231,10 @@ class AuxPL(FPI):
         self.debug()
         for aux_idx in range(1, self.num_aux + 1):
             self.tableau[0] -= self.tableau[aux_idx]
-            self.debug()
 
         self.__optmize__()
+
+        self.debug()
 
         if lt(self.tableau[ 0, -1 ], 0):
             raise InvalidPL

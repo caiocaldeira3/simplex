@@ -9,8 +9,16 @@ from typing import Union
 class Fraction:
     numerator: int
     denominator: int
+    infinity: bool = False
 
     def __init__ (self, numerator: int, denominator: int = 1) -> None:
+        if np.isinf(numerator):
+            self.numerator = 0
+            self.denominator = 0
+            self.infinity = True
+
+            return
+
         if np.issubdtype(type(numerator), np.float):
             self.numerator, self.denominator = numerator.as_integer_ratio()
 
@@ -108,6 +116,47 @@ class Fraction:
     __rmul__ = __mul__
     __radd__ = __add__
     __rsub__ = __sub__
+
+    def __eq__ (self, other: Union[Fraction, int]) -> bool:
+        if not isinstance(other, Fraction):
+            return self == Fraction(other)
+
+        if self.infinity or other.infinity:
+            return False
+
+        return self.numerator == other.numerator and self.denominator == other.denominator
+
+    def __le__ (self, other: Union[Fraction, int]) -> bool:
+        if not isinstance(other, Fraction):
+            return self <= Fraction(other)
+
+        if self.infinity and not other.infinity:
+            return False
+
+        elif other.infinity:
+            return True
+
+        lcm = math.lcm(self.denominator, other.denominator)
+        return self.numerator * lcm // self.denominator <= other.numerator * lcm // other.denominator
+
+    def __ge__ (self, other: Union[Fraction, int]) -> bool:
+        if not isinstance(other, Fraction):
+            return self >= Fraction(other)
+
+        if self.infinity:
+            return True
+
+        elif other.infinity:
+            return False
+
+        lcm = math.lcm(self.denominator, other.denominator)
+        return self.numerator * lcm // self.denominator >= other.numerator * lcm // other.denominator
+
+    def __lt__ (self, other: Union[Fraction, int]) -> bool:
+        return not self >= other
+
+    def __gt__ (self, other: Union[Fraction, int]) -> bool:
+        return not self <= other
 
     def to_float (self) -> float:
         return self.numerator / self.denominator
