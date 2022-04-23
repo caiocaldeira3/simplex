@@ -69,5 +69,4 @@ def str_ratio (x: Rational) -> str:
         return str(x)
 
     else:
-        print(type(x), x, isinstance(x, Fraction))
         return f"{x:>+7.3f}"
