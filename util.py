@@ -49,62 +49,25 @@ class ProblemClass(Enum):
         elif self.value == 1:
             return "max"
 
+def padronize (x: Rational, flag: bool) -> Rational:
+    return fractionize(x) if flag else floatize(x)
 
-def div (x: Rational, y: Rational, flag: bool = False) -> Rational:
-    if not flag:
-        if isinstance(x, Fraction) or isinstance(y, Fraction):
-            return (x / y).to_float()
+def fractionize (x: Rational) -> Rational:
+    if isinstance(x, Fraction):
+        return x
 
-        return x / y
+    return Fraction(x)
 
-    elif isinstance(x, Fraction) or isinstance(y, Fraction):
-        return x / y
+def floatize (x: Rational) -> Rational:
+    if isinstance(x, Fraction):
+        return x.to_float()
 
-    else:
-        return Fraction(x) / y
-
-def add (x: Rational, y: Rational, flag: bool = False) -> Rational:
-    if not flag:
-        if isinstance(x, Fraction) or isinstance(y, Fraction):
-            return (x + y).to_float()
-
-        return x + y
-
-    elif isinstance(x, Fraction) or isinstance(y, Fraction):
-        return x + y
-
-    else:
-        return Fraction(x + y)
-
-def sub (x: Rational, y: Rational, flag: bool = False) -> Rational:
-    if not flag:
-        if isinstance(x, Fraction) or isinstance(y, Fraction):
-            return (x - y).to_float()
-
-        return x - y
-
-    elif isinstance(x, Fraction) or isinstance(y, Fraction):
-        return x - y
-
-    else:
-        return Fraction(x - y)
-
-def mult (x: Rational, y: Rational, flag: bool = False) -> Rational:
-    if not flag:
-        if isinstance(x, Fraction) or isinstance(y, Fraction):
-            return (x * y).to_float()
-
-        return x * y
-
-    elif isinstance(x, Fraction) or isinstance(y, Fraction):
-        return x * y
-
-    else:
-        return Fraction(x * y)
+    return float(x)
 
 def str_ratio (x: Rational) -> str:
     if isinstance(x, Fraction):
         return str(x)
 
     else:
+        print(type(x), x, isinstance(x, Fraction))
         return f"{x:>+7.3f}"

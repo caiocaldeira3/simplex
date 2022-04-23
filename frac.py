@@ -1,6 +1,8 @@
 from __future__ import annotations
+from decimal import DivisionByZero
 
 import math
+import numpy as np
 
 from typing import Union
 
@@ -9,23 +11,30 @@ class Fraction:
     denominator: int
 
     def __init__ (self, numerator: int, denominator: int = 1) -> None:
-        if isinstance(numerator, float):
+        if np.issubdtype(type(numerator), np.float):
             self.numerator, self.denominator = numerator.as_integer_ratio()
 
-        elif isinstance(numerator, int):
+        elif np.issubdtype(type(numerator), np.integer):
             self.numerator = numerator
             self.denominator = 1
 
         else:
+            print(numerator)
             raise TypeError
 
-        if isinstance(denominator, float):
+        if np.issubdtype(type(denominator), np.float):
+            if np.isclose(denominator, 0):
+                raise DivisionByZero
+
             denom_fraction = Fraction(*denominator.as_integer_ratio())
 
             self.numerator *= denom_fraction.denominator
             self.denominator *= denom_fraction.numerator
 
-        elif isinstance(denominator, int):
+        elif np.issubdtype(type(denominator), np.integer):
+            if denominator == 0:
+                raise DivisionByZero
+
             self.denominator *= denominator
 
         else:
@@ -84,6 +93,9 @@ class Fraction:
             self.numerator * y.numerator,
             self.denominator * y.denominator
         )
+
+    def __neg__ (self) -> Fraction:
+        return -1 * self
 
     __rmul__ = __mul__
     __radd__ = __add__

@@ -2,8 +2,7 @@ from __future__ import annotations
 import numpy as np
 
 from util import (
-    Rational, ProblemClass, RestrictionType,
-    add, sub, div, mult, str_ratio
+    Rational, ProblemClass, RestrictionType, padronize, str_ratio
 )
 
 class PL:
@@ -17,12 +16,14 @@ class PL:
     a_matrix: np.ndarray[np.ndarray[Rational]]
 
     restrictions_type: np.ndarray[RestrictionType]
+    fraction: bool
 
     def __init__ (
         self, problem_class: ProblemClass, c_vec: np.ndarray[Rational],
         restrictions: np.ndarray[np.ndarray[Rational]],
-        restrictions_type: np.ndarray[RestrictionType]
+        restrictions_type: np.ndarray[RestrictionType], fraction: bool = False
     ) -> None:
+        self.fraction = fraction
         self.problem_class = ProblemClass(problem_class)
         self.restrictions_type = np.array(
             [ RestrictionType(res_id) for res_id in restrictions_type ]
@@ -34,6 +35,15 @@ class PL:
         self.a_matrix = restrictions[ : , : -1 ]
         self.b_vec = restrictions[ : , -1 ]
         self.c_vec = c_vec
+
+        self.__padronize__()
+
+    def __padronize__ (self):
+        self.a_matrix = np.array([
+            np.vectorize(padronize)(row, self.fraction) for row in self.a_matrix
+        ])
+        self.b_vec = np.vectorize(padronize)(self.b_vec, self.fraction)
+        self.c_vec = np.vectorize(padronize)(self.c_vec, self.fraction)
 
     def solve (self) -> Rational:
         return FPI(self).solve()
@@ -57,6 +67,7 @@ class FPI(PL):
     tableau: np.ndarray[np.ndarray[Rational]]
 
     def __init__ (self, pl: PL) -> None:
+        self.fraction = pl.fraction
         self.problem_class = ProblemClass.MAX
         self.original_class = pl.problem_class
         self.restrictions_type = np.full(pl.restrictions_type.shape, RestrictionType.EQ)
@@ -65,23 +76,24 @@ class FPI(PL):
         aux_vars = self.__aux_vars__(pl)
         self.num_vars = pl.num_vars + self.num_aux
 
-        self.a_matrix = np.empty((self.num_res, self.num_vars))
+        self.a_matrix = np.empty((self.num_res, self.num_vars), dtype=pl.a_matrix.dtype)
         self.a_matrix[ : , : -self.num_aux ] = pl.a_matrix
         self.a_matrix[ : , -self.num_aux : ] = aux_vars
 
         self.b_vec = pl.b_vec
         self.__init_c__(pl)
+        self.__padronize__()
 
         self.__init_tableau__()
 
     def __init_tableau__ (self) -> None:
-        self.tableau = np.zeros((self.num_res + 1, self.num_vars + 1))
+        self.tableau = np.zeros((self.num_res + 1, self.num_vars + 1), dtype=self.a_matrix.dtype)
         self.tableau[ 0 , : -1 ] = -self.c_vec
         self.tableau[ 1 : , : self.num_vars ] = self.a_matrix
         self.tableau[ 1 : , -1 ] = self.b_vec.T
 
     def __init_c__ (self, pl: PL) -> None:
-        self.c_vec = np.zeros(self.num_vars)
+        self.c_vec = np.zeros(self.num_vars, dtype=pl.c_vec.dtype)
         self.c_vec[ : -self.num_aux] = (
             pl.c_vec if self.original_class is ProblemClass.MAX else -pl.c_vec
         )
@@ -92,7 +104,7 @@ class FPI(PL):
             if pl.restrictions_type[idx] is not RestrictionType.EQ:
                 inequalities.append((idx, len(inequalities), pl.restrictions_type[idx]))
 
-        aux_vars = np.zeros((self.num_res, len(inequalities)))
+        aux_vars = np.zeros((self.num_res, len(inequalities)), dtype=pl.a_matrix.dtype)
         self.num_aux = len(inequalities)
         for row, column, res_type in inequalities:
             aux_vars[row, column] = 1 if res_type is RestrictionType.LEQ else -1
@@ -102,15 +114,20 @@ class FPI(PL):
     def solve (self) -> Rational:
         pass
 
-    def __get_t__ (self, row: int, column: int, flag: bool = False) -> Rational:
-        return div(self.tableau[row, -1], self.tableau[row, column], flag)
+    def __get_t__ (self, row: int, column: int) -> Rational:
+        return self.tableau[row, -1] / self.tableau[row, column]
 
     def stagger_column (self, column: int) -> None:
-        row = min(range(1, self.num_res + 1), key=lambda r: self.__get_t__(r, column))
+        row_t = min(range(1, self.num_res + 1), key=lambda r: self.__get_t__(r, column))
+        for row in range(self.num_res + 1):
+            if row == row_t:
+                continue
 
-    def str_simplex (self, row_t: int = -1, column_t: int = -1, flag: bool = False) -> str:
+            ratio = self.tableau[row, column]
+
+    def str_simplex (self, row_t: int = -1, column_t: int = -1) -> str:
         if row_t != -1 and column_t != -1:
-            min_t = self.__get_t__(row_t, column_t, flag)
+            min_t = self.__get_t__(row_t, column_t)
 
         elif row_t != -1 or column_t != -1:
             raise Exception
@@ -123,7 +140,7 @@ class FPI(PL):
         return st + "\n".join([
             f"| {' '.join([ f'{res:>+7.3f}' for res in self.tableau[ row, : -1 ] ] )} | " +
             f" {self.tableau[ row, -1 ]:>+7.3f} |" +
-            ((f"{min_t:>7.3f}" if not flag else f"   {min_t}") if row_t == row else "")
+            (f"{str_ratio(min_t)}" if row_t == row else "")
             for row in range(1, self.num_res + 1)
         ]) + "\n"
 
@@ -136,7 +153,7 @@ class AuxPL(FPI):
         self.num_aux = pl.num_res
         return np.eye(self.num_aux)
 
-    def solve (self, flag: bool = False) -> None:
+    def solve (self) -> None:
         aux_matrix = self.tableau.copy()
 
         self.debug()
