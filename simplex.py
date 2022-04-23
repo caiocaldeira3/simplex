@@ -3,7 +3,7 @@ import numpy as np
 
 from util import (
     Rational,
-    leq, beq, lt, bt, padronize, str_ratio,
+    leq, beq, lt, bt, eq, padronize, str_ratio,
     InvalidPL, ProblemClass, RestrictionType
 )
 
@@ -118,14 +118,23 @@ class FPI(PL):
 
         return aux_vars
 
-    def solve (self) -> Rational:
-        pass
-
     def __get_t__ (self, row: int, column: int) -> Rational:
         if leq(self.tableau[row, column], 0):
             return padronize(np.inf, self.fraction)
 
         return self.tableau[row, -1] / self.tableau[row, column]
+
+    def __form_basic_solution__ (self) -> np.ndarray:
+        basic_solution = np.zeros(self.num_vars)
+        for column in range(self.num_vars):
+            one = np.where(eq(self.tableau[ : , column ], 1))[0]
+            zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
+
+            if len(one) == 1 and len(zeros) == self.num_res:
+                row = one[0]
+                basic_solution[column] = self.tableau[row, -1]
+
+        return np.vectorize(padronize)(basic_solution, self.fraction)
 
     def stagger_column (self, column: int) -> None:
         row_t = min(range(1, self.num_res + 1), key=lambda r: self.__get_t__(r, column))
@@ -141,6 +150,39 @@ class FPI(PL):
 
             ratio = self.tableau[row, column] / self.tableau[row_t, column]
             self.tableau[row] -= self.tableau[row_t] * ratio
+
+    def __optmize__ (self) -> None:
+        flag = True
+        while flag:
+            flag = False
+            for column in range(self.tableau.shape[1] - 1):
+                if lt(self.tableau[ 0, column ], 0):
+                    flag = True
+                    self.stagger_column(column)
+                    break
+
+            self.debug()
+
+    def solve (self) -> Rational:
+        aux_matrix = self.tableau.copy()
+
+        new_tableau, bvs = AuxPL(self).solve()
+        self.tableau[ 1 : , : -1 ] = new_tableau[ 1 : , : self.num_vars ]
+        self.tableau[ 1 : , -1 ] = new_tableau[ 1 : , -1 ]
+
+        self.debug()
+
+        for column in range(self.num_vars):
+            if bt(bvs[column], 0):
+                self.stagger_column(column)
+                self.debug()
+
+        self.__optmize__()
+
+        basic_solution = self.__form_basic_solution__()
+        self.tableau, aux_matrix = aux_matrix, self.tableau
+
+        return aux_matrix, basic_solution
 
     def str_tableau (self, row_t: int = -1, column_t: int = -1) -> str:
         if row_t != -1 and column_t != -1:
@@ -173,6 +215,18 @@ class AuxPL(FPI):
         self.num_aux = pl.num_res
         return np.eye(self.num_aux)
 
+    def __form_basic_solution__ (self) -> np.ndarray:
+        basic_solution = np.zeros(self.num_vars - self.num_aux)
+        for column in range(self.num_vars - self.num_aux):
+            one = np.where(eq(self.tableau[ : , column ], 1))[0]
+            zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
+
+            if len(one) == 1 and len(zeros) == self.num_res:
+                row = one[0]
+                basic_solution[column] = self.tableau[row, -1]
+
+        return np.vectorize(padronize)(basic_solution, self.fraction)
+
     def solve (self) -> None:
         aux_matrix = self.tableau.copy()
 
@@ -181,19 +235,12 @@ class AuxPL(FPI):
             self.tableau[0] -= self.tableau[aux_idx]
             self.debug()
 
-        flag = True
-        while flag:
-            flag = False
-            for column in range(self.tableau.shape[1] - 1):
-                if lt(self.tableau[ 0, column ], 0):
-                    flag = True
-                    self.stagger_column(column)
-                    break
-
-            self.debug()
+        self.__optmize__()
 
         if lt(self.tableau[ 0, -1 ], 0):
             raise InvalidPL
 
+        basic_solution = self.__form_basic_solution__()
         self.tableau, aux_matrix = aux_matrix, self.tableau
-        return aux_matrix
+
+        return aux_matrix, basic_solution
