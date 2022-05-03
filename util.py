@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import numpy as np
+import dataclasses as dc
 
 from enum import Enum
 from typing import Union
@@ -50,6 +53,48 @@ class ProblemClass(Enum):
 
         elif self.value == 1:
             return "max"
+
+class PLType (Enum):
+    INVALID = -1
+    LIMITED = 0
+    ILIMITED = 1
+
+    def __repr__ (self) -> str:
+        if self is PLType.INVALID:
+            return "Inválida"
+
+        elif self is PLType.LIMITED:
+            return "Limitada"
+
+        elif self is PLType.ILIMITED:
+            return "Ilimitada"
+
+    def __str__ (self) -> str:
+        if self is PLType.INVALID:
+            return "Inválida"
+
+        elif self is PLType.LIMITED:
+            return "Limitada"
+
+        elif self is PLType.ILIMITED:
+            return "Ilimitada"
+
+@dc.dataclass()
+class Result:
+    pl_type: PLType = dc.field(init=True)
+    certificate: np.ndarray = dc.field(init=True)
+    opt_x: np.ndarray = dc.field(init=True, default=None)
+
+def clean_tableau (func: function) -> function:
+    def wrapper (pl) -> Result:
+        aux_matrix = pl.tableau.copy()
+
+        res = func(pl)
+        pl.tableau, aux_matrix = aux_matrix, pl.tableau
+
+        return res
+
+    return wrapper
 
 def padronize (x: Rational, flag: bool) -> Rational:
     return fractionize(x) if flag else floatize(x)
@@ -105,6 +150,3 @@ def str_ratio (x: Rational) -> str:
 
     else:
         return f"{x:>+7.3f}"
-
-class InvalidPL(Exception):
-    pass

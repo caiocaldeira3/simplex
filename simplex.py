@@ -1,10 +1,13 @@
 from __future__ import annotations
+from typing import Optional, Tuple
 import numpy as np
 
 from util import (
+    PLType,
     Rational,
-    leq, beq, lt, bt, eq, padronize, str_ratio,
-    InvalidPL, ProblemClass, RestrictionType
+    Result,
+    leq, beq, lt, bt, eq, padronize, str_ratio, clean_tableau,
+    ProblemClass, RestrictionType
 )
 
 class PL:
@@ -91,17 +94,44 @@ class FPI(PL):
 
         self.__init_tableau__()
 
+    @property
+    def matrix_slice (self) -> Tuple[slice, slice]:
+        return (slice(1, self.num_res + 1), slice(self.num_res, self.num_res + self.num_vars))
+
+    @property
+    def aux_matrix_slice (self) -> Tuple[slice, slice]:
+        return (slice(1, self.num_res + 1), slice(self.num_res))
+
+    @property
+    def b_slice (self) -> Tuple[slice, slice]:
+        return (slice(1, self.num_res + 1), -1)
+
+    @property
+    def c_slice (self) -> Tuple[slice, slice]:
+        return (0, slice(self.num_res, self.num_res + self.num_vars))
+
+    @property
+    def certificate_slice (self) -> Tuple[slice, slice]:
+        return (0, slice(self.num_res))
+
+    @property
+    def fpi_slice (self) -> None:
+        return (slice(1, self.num_res + 1), slice(0, self.num_res + self.num_vars))
+
     def __init_tableau__ (self) -> None:
-        self.tableau = np.zeros((self.num_res + 1, self.num_vars + 1), dtype=self.a_matrix.dtype)
-        self.tableau[ 0 , : -1 ] = -self.c_vec
-        self.tableau[ 1 : , : self.num_vars ] = self.a_matrix
-        self.tableau[ 1 : , -1 ] = self.b_vec.T
+        self.tableau = np.zeros(
+            (self.num_res + 1, self.num_res + self.num_vars + 1), dtype=self.a_matrix.dtype
+        )
+        self.tableau[ self.aux_matrix_slice ] = np.eye(self.num_res)
+        self.tableau[ self.c_slice ] = -self.c_vec
+        self.tableau[ self.matrix_slice ] = self.a_matrix
+        self.tableau[ self.b_slice ] = self.b_vec.T
 
         self.tableau[ 0, -1 ] = padronize(self.tableau[ 0, -1 ], self.fraction)
 
     def __init_c__ (self, pl: PL) -> None:
         self.c_vec = np.zeros(self.num_vars, dtype=pl.c_vec.dtype)
-        self.c_vec[ : -self.num_aux] = (
+        self.c_vec[ : -self.num_aux ] = (
             pl.c_vec if self.original_class is ProblemClass.MAX else -pl.c_vec
         )
 
@@ -124,22 +154,22 @@ class FPI(PL):
 
         return self.tableau[row, -1] / self.tableau[row, column]
 
-    def __form_basic_solution__ (self) -> np.ndarray:
-        basic_solution = np.zeros(self.num_vars, self.tableau.dtype)
-        for column in range(self.num_vars):
+    def __form_solution__ (self) -> np.ndarray:
+        solution = np.zeros(self.num_vars, self.tableau.dtype)
+        for column in range(self.num_res, self.num_res + self.num_vars):
             one = np.where(eq(self.tableau[ : , column ], 1))[0]
             zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
 
             if len(one) == 1 and len(zeros) == self.num_res:
                 row = one[0]
-                basic_solution[column] = self.tableau[row, -1]
+                solution[column - self.num_res] = self.tableau[row, -1]
 
-        return np.vectorize(padronize)(basic_solution, self.fraction)
+        return np.vectorize(padronize)(solution, self.fraction)
 
-    def stagger_column (self, column: int) -> None:
+    def stagger_column (self, column: int) -> Optional[Result]:
         row_t = min(range(1, self.num_res + 1), key=lambda r: self.__get_t__(r, column))
-        if leq(self.tableau[row_t][column], 0):
-            raise InvalidPL
+        if lt(self.tableau[row_t, column], 0):
+            return Result(PLType.ILIMITED, self.tableau[ 0, : self.num_res])
 
         self.debug(row_t, column)
 
@@ -155,32 +185,33 @@ class FPI(PL):
         flag = True
         while flag:
             flag = False
-            for column in range(self.tableau.shape[1] - 1):
+            for column in range(self.num_res, self.tableau.shape[1] - 1):
                 if lt(self.tableau[ 0, column ], 0):
                     flag = True
                     self.stagger_column(column)
                     break
 
+    @clean_tableau
     def solve (self) -> Rational:
-        aux_matrix = self.tableau.copy()
+        aux_tableau, aux_res = AuxPL(self).solve()
+        if aux_res.pl_type is PLType.INVALID:
+            return aux_res
 
-        new_tableau, bvs = AuxPL(self).solve()
-        self.tableau[ 1 : , : -1 ] = new_tableau[ 1 : , : self.num_vars ]
-        self.tableau[ 1 : , -1 ] = new_tableau[ 1 : , -1 ]
+        self.tableau[self.fpi_slice] = aux_tableau[self.fpi_slice]
+        self.tableau[self.b_slice] = aux_tableau[self.b_slice]
 
         self.debug()
 
         for column in range(self.num_vars):
-            if bt(bvs[column], 0) and bt(self.tableau[ 0, column ], 0):
+            if bt(aux_res.opt_x[column], 0) and bt(self.tableau[ 0, column ], 0):
                 self.stagger_column(column)
 
         self.__optmize__()
 
         self.debug()
-        basic_solution = self.__form_basic_solution__()
-        self.tableau, aux_matrix = aux_matrix, self.tableau
+        solution = self.__form_solution__()
 
-        return aux_matrix, basic_solution
+        return Result(PLType.LIMITED, self.tableau[ self.certificate_slice ], solution)
 
     def str_tableau (self, row_t: int = -1, column_t: int = -1) -> str:
         if row_t != -1 and column_t != -1:
@@ -215,19 +246,18 @@ class AuxPL(FPI):
 
     def __form_basic_solution__ (self) -> np.ndarray:
         basic_solution = np.zeros(self.num_vars - self.num_aux, self.tableau.dtype)
-        for column in range(self.num_vars - self.num_aux):
+        for column in range(self.num_res, self.num_res + self.num_vars - self.num_aux):
             one = np.where(eq(self.tableau[ : , column ], 1))[0]
             zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
 
             if len(one) == 1 and len(zeros) == self.num_res:
                 row = one[0]
-                basic_solution[column] = self.tableau[row, -1]
+                basic_solution[column - self.num_res] = self.tableau[row, -1]
 
         return np.vectorize(padronize)(basic_solution, self.fraction)
 
-    def solve (self) -> None:
-        aux_matrix = self.tableau.copy()
-
+    @clean_tableau
+    def solve (self) -> Result:
         self.debug()
         for aux_idx in range(1, self.num_aux + 1):
             self.tableau[0] -= self.tableau[aux_idx]
@@ -237,9 +267,10 @@ class AuxPL(FPI):
         self.debug()
 
         if lt(self.tableau[ 0, -1 ], 0):
-            raise InvalidPL
+            return Result(PLType.INVALID, self.tableau[ self.certificate_slice ])
 
         basic_solution = self.__form_basic_solution__()
-        self.tableau, aux_matrix = aux_matrix, self.tableau
-
-        return aux_matrix, basic_solution
+        return (
+            self.tableau,
+            Result(PLType.LIMITED, self.tableau[ self.certificate_slice ], basic_solution)
+        )
