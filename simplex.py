@@ -166,9 +166,23 @@ class FPI(PL):
 
         return np.vectorize(padronize)(solution, self.fraction)
 
+    def get_row (self, column: int) -> int:
+        min_row = 1
+        for row_indx in range(2, self.num_res + 1):
+            if leq(self.tableau[min_row, column], 0):
+                min_row = row_indx
+
+            elif leq(self.tableau[row_indx, column], 0):
+                continue
+
+            elif lt(self.__get_t__(row_indx, column), self.__get_t__(min_row, column)):
+                min_row = row_indx
+
+        return min_row
+
     def stagger_column (self, column: int) -> Optional[Result]:
-        row_t = min(range(1, self.num_res + 1), key=lambda r: self.__get_t__(r, column))
-        if lt(self.tableau[row_t, column], 0):
+        row_t = self.get_row(column)
+        if leq(self.tableau[row_t, column], 0):
             return Result(PLType.ILIMITED, self.tableau[ 0, : self.num_res])
 
         self.debug(row_t, column)
