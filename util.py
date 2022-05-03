@@ -150,3 +150,6 @@ def str_ratio (x: Rational) -> str:
 
     else:
         return f"{x:>+7.3f}"
+
+class NotBasic (Exception):
+    pass

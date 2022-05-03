@@ -3,11 +3,11 @@ from typing import Optional, Tuple
 import numpy as np
 
 from util import (
-    PLType,
-    Rational,
+    PLType, ProblemClass, RestrictionType, Rational,
     Result,
-    leq, beq, lt, bt, eq, padronize, str_ratio, clean_tableau,
-    ProblemClass, RestrictionType
+    leq, lt, bt, eq, padronize, str_ratio, clean_tableau,
+    NotBasic
+
 )
 
 class PL:
@@ -24,18 +24,22 @@ class PL:
     fraction: bool
 
     def __init__ (
-        self, problem_class: ProblemClass, c_vec: np.ndarray[Rational],
-        restrictions: np.ndarray[np.ndarray[Rational]],
-        restrictions_type: np.ndarray[RestrictionType], fraction: bool = False
+        self, c_vec: np.ndarray[Rational],
+        restrictions: np.ndarray[np.ndarray[Rational]], problem_class: ProblemClass = None,
+        restrictions_type: np.ndarray[RestrictionType] = None, fraction: bool = False
     ) -> None:
         self.fraction = fraction
-        self.problem_class = ProblemClass(problem_class)
-        self.restrictions_type = np.array(
-            [ RestrictionType(res_id) for res_id in restrictions_type ]
-        )
-
+        self.problem_class = problem_class if problem_class is not None else ProblemClass.MAX
         self.num_vars = len(c_vec)
         self.num_res = restrictions.shape[0]
+
+        if restrictions_type is None:
+            self.restrictions_type = np.full((self.num_res,), RestrictionType.LEQ)
+
+        else:
+            self.restrictions_type = np.array(
+                [ RestrictionType(res_id) for res_id in restrictions_type ]
+            )
 
         self.a_matrix = restrictions[ : , : -1 ]
         self.b_vec = restrictions[ : , -1 ]
@@ -51,7 +55,12 @@ class PL:
         self.c_vec = np.vectorize(padronize)(self.c_vec, self.fraction)
 
     def solve (self) -> Rational:
-        return FPI(self).solve()
+        result = FPI(self).solve()
+        if result.pl_type is not PLType.INVALID:
+            result.opt_x = result.opt_x[ : self.num_vars ]
+            result.certificate = result.certificate[ : self.num_vars ]
+
+        return result
 
     def compute (self, x: np.ndarray) -> Rational:
         return self.c_vec @ padronize(x)
@@ -90,9 +99,13 @@ class FPI(PL):
 
         self.b_vec = pl.b_vec
         self.__init_c__(pl)
+        self.__init_tableau__()
+
         self.__padronize__()
 
-        self.__init_tableau__()
+    def __padronize__ (self):
+        super()
+        self.tableau = np.vectorize(padronize)(self.tableau, self.fraction)
 
     @property
     def matrix_slice (self) -> Tuple[slice, slice]:
@@ -127,6 +140,10 @@ class FPI(PL):
         self.tableau[ self.matrix_slice ] = self.a_matrix
         self.tableau[ self.b_slice ] = self.b_vec.T
 
+        for row in range(1, self.num_res + 1):
+            if lt(self.tableau[ row, -1 ], 0):
+                self.tableau[ row, : ] *= -1
+
         self.tableau[ 0, -1 ] = padronize(self.tableau[ 0, -1 ], self.fraction)
 
     def __init_c__ (self, pl: PL) -> None:
@@ -154,17 +171,41 @@ class FPI(PL):
 
         return self.tableau[row, -1] / self.tableau[row, column]
 
+    def __get_basic_row__ (self, column) -> int:
+        one = np.where(eq(self.tableau[ : , column ], 1))[0]
+        zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
+
+        if len(one) == 1 and len(zeros) == self.num_res:
+            return one[0]
+
+        raise NotBasic
+
     def __form_solution__ (self) -> np.ndarray:
         solution = np.zeros(self.num_vars, self.tableau.dtype)
         for column in range(self.num_res, self.num_res + self.num_vars):
-            one = np.where(eq(self.tableau[ : , column ], 1))[0]
-            zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
-
-            if len(one) == 1 and len(zeros) == self.num_res:
-                row = one[0]
+            try:
+                row = self.__get_basic_row__(column)
                 solution[column - self.num_res] = self.tableau[row, -1]
+                self.tableau[row, -1] = 0
+
+            except NotBasic:
+                continue
 
         return np.vectorize(padronize)(solution, self.fraction)
+
+    def __ilimited_certificate__ (self, ili_col: int) -> np.ndarray[Rational]:
+        certificate = np.zeros(self.num_vars, dtype=self.tableau.dtype)
+        certificate[ili_col - self.num_res] = padronize(1, self.fraction)
+        for column in range(self.num_res, self.num_res + self.num_vars):
+            try:
+                row = self.__get_basic_row__(column)
+                certificate[column - self.num_res] = self.tableau[row, ili_col] * -1
+                self.tableau[row, ili_col] = 0
+
+            except Exception as exc:
+                continue
+
+        return certificate
 
     def get_row (self, column: int) -> int:
         min_row = 1
@@ -183,7 +224,11 @@ class FPI(PL):
     def stagger_column (self, column: int) -> Optional[Result]:
         row_t = self.get_row(column)
         if leq(self.tableau[row_t, column], 0):
-            return Result(PLType.ILIMITED, self.tableau[ 0, : self.num_res])
+            return Result(
+                PLType.ILIMITED,
+                self.__ilimited_certificate__(column),
+                self.__form_solution__()
+            )
 
         self.debug(row_t, column)
 
@@ -195,18 +240,22 @@ class FPI(PL):
             ratio = self.tableau[row, column] / self.tableau[row_t, column]
             self.tableau[row] -= self.tableau[row_t] * ratio
 
-    def __optmize__ (self) -> None:
+    def __optmize__ (self) -> Optional[Result]:
         flag = True
+        res = None
         while flag:
             flag = False
             for column in range(self.num_res, self.tableau.shape[1] - 1):
                 if lt(self.tableau[ 0, column ], 0):
                     flag = True
-                    self.stagger_column(column)
+                    res = self.stagger_column(column)
                     break
 
+            if res is not None:
+                return res
+
     @clean_tableau
-    def solve (self) -> Rational:
+    def solve (self) -> Result:
         aux_tableau, aux_res = AuxPL(self).solve()
         if aux_res.pl_type is PLType.INVALID:
             return aux_res
@@ -220,12 +269,15 @@ class FPI(PL):
             if bt(aux_res.opt_x[column], 0) and bt(self.tableau[ 0, column ], 0):
                 self.stagger_column(column)
 
-        self.__optmize__()
+        res = self.__optmize__()
+        if res is not None:
+            return res
 
         self.debug()
-        solution = self.__form_solution__()
 
-        return Result(PLType.LIMITED, self.tableau[ self.certificate_slice ], solution)
+        return Result(
+            PLType.LIMITED, self.tableau[ self.certificate_slice ], self.__form_solution__()
+        )
 
     def str_tableau (self, row_t: int = -1, column_t: int = -1) -> str:
         if row_t != -1 and column_t != -1:
@@ -258,18 +310,6 @@ class AuxPL(FPI):
         self.num_aux = pl.num_res
         return np.eye(self.num_aux)
 
-    def __form_basic_solution__ (self) -> np.ndarray:
-        basic_solution = np.zeros(self.num_vars - self.num_aux, self.tableau.dtype)
-        for column in range(self.num_res, self.num_res + self.num_vars - self.num_aux):
-            one = np.where(eq(self.tableau[ : , column ], 1))[0]
-            zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
-
-            if len(one) == 1 and len(zeros) == self.num_res:
-                row = one[0]
-                basic_solution[column - self.num_res] = self.tableau[row, -1]
-
-        return np.vectorize(padronize)(basic_solution, self.fraction)
-
     @clean_tableau
     def solve (self) -> Result:
         self.debug()
@@ -281,10 +321,13 @@ class AuxPL(FPI):
         self.debug()
 
         if lt(self.tableau[ 0, -1 ], 0):
-            return Result(PLType.INVALID, self.tableau[ self.certificate_slice ])
+            return None, Result(PLType.INVALID, self.tableau[ self.certificate_slice ])
 
-        basic_solution = self.__form_basic_solution__()
         return (
-            self.tableau,
-            Result(PLType.LIMITED, self.tableau[ self.certificate_slice ], basic_solution)
+            self.tableau.copy(),
+            Result(
+                PLType.LIMITED,
+                self.tableau[ self.certificate_slice ],
+                self.__form_solution__()
+            )
         )
