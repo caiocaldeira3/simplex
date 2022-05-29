@@ -6,7 +6,7 @@ from util import (
     PLType, ProblemClass, RestrictionType, Rational,
     Result,
     leq, lt, bt, eq, padronize, str_ratio, clean_tableau,
-    NotBasic
+    InvalidPLType, NotBasic, WrongAnswer
 
 )
 
@@ -54,16 +54,68 @@ class PL:
         self.b_vec = np.vectorize(padronize)(self.b_vec, self.fraction)
         self.c_vec = np.vectorize(padronize)(self.c_vec, self.fraction)
 
+    def __verify__ (self, result: Result) -> bool:
+        if result.pl_type is PLType.ILIMITED:
+            #print(np.round(self.a_matrix @ result.certificate, 4))
+            if not np.all(np.round(self.a_matrix @ result.certificate, 5) <= 0):
+                raise WrongAnswer
+
+            #print(self.c_vec @ result.certificate)
+            if not np.all(np.round(self.c_vec @ result.certificate, 5) > 0):
+                raise WrongAnswer
+
+            return True
+
+        elif result.pl_type is PLType.INVALID:
+            #print(result.certificate @ self.a_matrix)
+            if not np.all(np.round(result.certificate @ self.a_matrix, 7) >= 0):
+                raise WrongAnswer
+
+            #print(self.b_vec)
+            #print(result.certificate @ self.b_vec)
+            if not np.all(np.round(result.certificate @ self.b_vec, 7) < 0):
+                raise WrongAnswer
+
+            return True
+
+        elif result.pl_type is PLType.LIMITED:
+            #print(result.certificate, self.b_vec)
+            #print(self.compute(result.opt_x), result.certificate @ self.b_vec)
+            if not eq(self.compute(result.opt_x), result.certificate @ self.b_vec):
+                raise WrongAnswer
+
+            #print(result.certificate @ self.a_matrix - self.c_vec)
+            if not np.all(np.round(result.certificate @ self.a_matrix - self.c_vec, 5) >= 0):
+                raise WrongAnswer
+
+            return True
+
+        raise InvalidPLType
+
     def solve (self) -> Rational:
-        result = FPI(self).solve()
-        if result.pl_type is not PLType.INVALID:
+        fpi = FPI(self)
+        result = fpi.solve()
+        fpi.__verify__(result)
+
+        if result.pl_type is PLType.LIMITED:
             result.opt_x = result.opt_x[ : self.num_vars ]
+
+        if result.pl_type is not PLType.ILIMITED:
+            result.certificate = result.certificate[ : self.num_res ]
+
+            for row in range(len(self.b_vec)):
+                if lt(self.b_vec[row], 0):
+                    result.certificate[row] *= -1
+        else:
+
             result.certificate = result.certificate[ : self.num_vars ]
+
+        self.__verify__(result)
 
         return result
 
     def compute (self, x: np.ndarray) -> Rational:
-        return self.c_vec @ padronize(x)
+        return self.c_vec @ padronize(x, self.fraction)
 
     def __format_cvec__ (self) -> range:
         for idx in range(self.num_vars):
@@ -94,10 +146,10 @@ class FPI(PL):
         self.num_vars = pl.num_vars + self.num_aux
 
         self.a_matrix = np.empty((self.num_res, self.num_vars), dtype=pl.a_matrix.dtype)
-        self.a_matrix[ : , : -self.num_aux ] = pl.a_matrix
+        self.a_matrix[ : , : -self.num_aux ] = pl.a_matrix.copy()
         self.a_matrix[ : , -self.num_aux : ] = aux_vars
 
-        self.b_vec = pl.b_vec
+        self.b_vec = pl.b_vec.copy()
         self.__init_c__(pl)
         self.__init_tableau__()
 
@@ -136,20 +188,22 @@ class FPI(PL):
             (self.num_res + 1, self.num_res + self.num_vars + 1), dtype=self.a_matrix.dtype
         )
         self.tableau[ self.aux_matrix_slice ] = np.eye(self.num_res)
-        self.tableau[ self.c_slice ] = -self.c_vec
-        self.tableau[ self.matrix_slice ] = self.a_matrix
-        self.tableau[ self.b_slice ] = self.b_vec.T
+        self.tableau[ self.c_slice ] = -self.c_vec.copy()
+        self.tableau[ self.matrix_slice ] = self.a_matrix.copy()
+        self.tableau[ self.b_slice ] = self.b_vec.T.copy()
 
         for row in range(1, self.num_res + 1):
             if lt(self.tableau[ row, -1 ], 0):
+                self.a_matrix[ row - 1] *= -1
                 self.tableau[ row, : ] *= -1
+                self.b_vec[row - 1] *= -1
 
         self.tableau[ 0, -1 ] = padronize(self.tableau[ 0, -1 ], self.fraction)
 
     def __init_c__ (self, pl: PL) -> None:
         self.c_vec = np.zeros(self.num_vars, dtype=pl.c_vec.dtype)
         self.c_vec[ : -self.num_aux ] = (
-            pl.c_vec if self.original_class is ProblemClass.MAX else -pl.c_vec
+            pl.c_vec.copy() if self.original_class is ProblemClass.MAX else -pl.c_vec
         )
 
     def __aux_vars__ (self, pl: PL) -> np.ndarray[np.ndarray[int]]:
@@ -171,12 +225,12 @@ class FPI(PL):
 
         return self.tableau[row, -1] / self.tableau[row, column]
 
-    def __get_basic_row__ (self, column) -> int:
-        one = np.where(eq(self.tableau[ : , column ], 1))[0]
-        zeros = np.where(eq(self.tableau[ : , column ], 0))[0]
+    def __get_basic_row__ (self, column: int, start: int = 0) -> int:
+        one = np.where(eq(self.tableau[ start : , column ], 1))[0]
+        zeros = np.where(eq(self.tableau[ start : , column ], 0))[0]
 
-        if len(one) == 1 and len(zeros) == self.num_res:
-            return one[0]
+        if len(one) == 1 and len(zeros) == self.num_res - start:
+            return one[0] + start
 
         raise NotBasic
 
@@ -198,7 +252,7 @@ class FPI(PL):
         certificate[ili_col - self.num_res] = padronize(1, self.fraction)
         for column in range(self.num_res, self.num_res + self.num_vars):
             try:
-                row = self.__get_basic_row__(column)
+                row = self.__get_basic_row__(column, 1)
                 certificate[column - self.num_res] = self.tableau[row, ili_col] * -1
                 self.tableau[row, ili_col] = 0
 
@@ -254,10 +308,53 @@ class FPI(PL):
             if res is not None:
                 return res
 
+    def __verify__ (self, result: Result) -> bool:
+        if result.pl_type is PLType.ILIMITED:
+            #print(np.round(self.a_matrix @ result.certificate, 4))
+            if not np.all(np.round(self.a_matrix @ result.certificate, 5) <= 0):
+                raise WrongAnswer
+
+            #print(self.c_vec @ result.certificate)
+            if not np.all(np.round(self.c_vec @ result.certificate, 5) > 0):
+                raise WrongAnswer
+
+            return True
+
+        elif result.pl_type is PLType.INVALID:
+            #print(result.certificate @ self.a_matrix)
+            if not np.all(np.round(result.certificate @ self.a_matrix, 7) >= 0):
+                raise WrongAnswer
+
+            #print(self.b_vec)
+            #print(result.certificate @ self.b_vec)
+            if not np.all(np.round(result.certificate @ self.b_vec, 7) < 0):
+                raise WrongAnswer
+
+            return True
+
+        elif result.pl_type is PLType.LIMITED:
+            #print(result.certificate, self.b_vec)
+            #print(self.compute(result.opt_x), result.certificate @ self.b_vec)
+            if not eq(self.compute(result.opt_x), result.certificate @ self.b_vec):
+                raise WrongAnswer
+
+            #print(result.certificate @ self.a_matrix - self.c_vec)
+            if not np.all(np.round(result.certificate @ self.a_matrix - self.c_vec, 5) >= 0):
+                raise WrongAnswer
+
+            return True
+
+        raise InvalidPLType
+
     @clean_tableau
     def solve (self) -> Result:
+        self.debug()
+
         aux_tableau, aux_res = AuxPL(self).solve()
         if aux_res.pl_type is PLType.INVALID:
+            return aux_res
+
+        if aux_res.pl_type is PLType.ILIMITED:
             return aux_res
 
         self.tableau[self.fpi_slice] = aux_tableau[self.fpi_slice]

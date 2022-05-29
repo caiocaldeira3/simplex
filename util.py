@@ -103,11 +103,17 @@ def fractionize (x: Rational) -> Rational:
     if isinstance(x, Fraction):
         return x
 
+    elif isinstance(x, np.ndarray):
+        return np.array([ fractionize(num) for num in x ])
+
     return Fraction(x)
 
 def floatize (x: Rational) -> Rational:
     if isinstance(x, Fraction):
         return x.to_float()
+
+    elif isinstance(x, np.ndarray):
+        return np.array([ floatize(num) for num in x ])
 
     return float(x)
 
@@ -127,7 +133,7 @@ def leq (x: Rational, y: Rational) -> bool:
     elif np.issubdtype(type(x), np.ndarray) and isinstance(x[0], Fraction):
         return x <= y
 
-    return x < y or eq(x, y)
+    return np.all(x < y or eq(x, y))
 
 def beq (x: Rational, y: Rational) -> bool:
     if isinstance(x, Fraction):
@@ -152,4 +158,10 @@ def str_ratio (x: Rational) -> str:
         return f"{x:>+7.3f}"
 
 class NotBasic (Exception):
+    pass
+
+class WrongAnswer (Exception):
+    pass
+
+class InvalidPLType (Exception):
     pass
