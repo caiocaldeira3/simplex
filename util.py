@@ -61,7 +61,7 @@ class PLType (Enum):
 
     def __repr__ (self) -> str:
         if self is PLType.INVALID:
-            return "Inválida"
+            return "Inviável"
 
         elif self is PLType.LIMITED:
             return "Limitada"
@@ -71,19 +71,34 @@ class PLType (Enum):
 
     def __str__ (self) -> str:
         if self is PLType.INVALID:
-            return "Inválida"
+            return "inviável"
 
         elif self is PLType.LIMITED:
-            return "Limitada"
+            return "limitada"
 
         elif self is PLType.ILIMITED:
-            return "Ilimitada"
+            return "ilimitada"
 
 @dc.dataclass()
 class Result:
     pl_type: PLType = dc.field(init=True)
     certificate: np.ndarray = dc.field(init=True)
     opt_x: np.ndarray = dc.field(init=True, default=None)
+
+    def print (self, pl) -> None:
+        print(self.pl_type)
+        if self.pl_type is PLType.LIMITED:
+            print(pl.compute(self.opt_x))
+
+        if self.pl_type is not PLType.INVALID:
+            for xi in self.opt_x:
+                print(f"{padronize(xi, False):>7.3f}", end=" ")
+            print()
+
+        for xi in self.certificate:
+            print(f"{padronize(xi, False):>7.3f}", end=" ")
+        print()
+
 
 def clean_tableau (func: function) -> function:
     def wrapper (pl) -> Result:
